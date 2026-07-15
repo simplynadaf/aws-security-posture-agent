@@ -1,208 +1,241 @@
-# DEV Summer Bug Smash - Progress Log
+# DEV Summer Bug Smash - Complete Progress Log
 
 ## Challenge: DEV's Summer Bug Smash (July 14 - August 23, 2026)
-## Target: Clear the Lineup + Best Use of Sentry ($500 prize)
+## Target: Clear the Lineup + Best Use of Sentry ($500) + Smash Stories ($200)
 
 ---
 
-## ✅ Day 1 (July 15) - Foundation + Tools
+## Project: AWS Security Posture Agent
 
-### What was done:
-- Provisioned EC2 instance (t3.medium, Ubuntu 24.04, us-east-1)
-  - Instance: REDACTED_INSTANCE_ID | IP: REDACTED_IP
-- Set up Python 3.12 environment with venv
-- Installed dependencies: crewai 1.15.2, sentry-sdk 2.65, boto3 1.42, streamlit
-- Signed up for Sentry with promo code `bugsmash26`
-- Configured `.env` with SENTRY_DSN
+**Repo:** https://github.com/simplynadaf/aws-security-posture-agent
+**EC2:** REDACTED_INSTANCE_ID | IP: REDACTED_IP | SSH: `ssh -i test.pem ubuntu@REDACTED_IP`
+**Project dir:** /home/ubuntu/security-posture-agent
+
+---
+
+## Done: Day 1 (July 15) - Foundation + Tools
+
+- Provisioned EC2 t3.medium, Ubuntu 24.04, us-east-1, 30GB gp3
+- Python 3.12 venv: crewai 1.15.2, sentry-sdk 2.65, boto3 1.42, streamlit
+- Signed up Sentry with promo code bugsmash26
+- Configured .env with SENTRY_DSN
 - Built 4 custom CrewAI tools:
-  1. `AWSResourceScanner` - inventories EC2, S3, Lambda, IAM, SGs, API GW, DynamoDB
-  2. `SecurityGroupAnalyzer` - checks open ports, default SGs, launch-wizard SGs
-  3. `S3ConfigChecker` - checks encryption, versioning, public access blocks
-  4. `IAMAnalyzer` - checks admin roles, MFA, key rotation (intentionally fetches all 90 roles)
-- Created 5 agent definitions (agents.yaml) with backstories
-- Created 5 task definitions (tasks.yaml) with expected outputs
-- Built crew orchestration (crew.py) with Bedrock Nova Pro
-- Ran first successful end-to-end pipeline scan
-- Generated first security_report.md with real findings
-
-### Key finding from Day 1:
-- Account has 90 IAM roles, 13 S3 buckets, 9 security groups, 3 EC2 instances
-- 26+ real security findings discovered
+  1. AWSResourceScanner - EC2, S3, Lambda, IAM, SGs, API GW, DynamoDB
+  2. SecurityGroupAnalyzer - open ports, default SGs, launch-wizard
+  3. S3ConfigChecker - encryption, versioning, public access blocks
+  4. IAMAnalyzer - admin roles, MFA, key rotation (intentionally fetches all 90 roles)
+- Created 5 agent definitions in agents.yaml with backstories
+- Created 5 task definitions in tasks.yaml with expected outputs
+- Built crew.py with Bedrock Nova Pro as LLM
+- First successful end-to-end scan, security_report.md generated
+- Account: 90 IAM roles, 13 S3 buckets, 9 SGs, 3 EC2, 7 Lambda
 
 ---
 
-## ✅ Day 2 (July 15) - Sentry AI Agent Monitoring Integration
+## Done: Day 2 (July 15) - Sentry AI Agent Monitoring
 
-### What was done:
-- Created `monitoring.py` with Sentry helpers:
-  - `init_sentry()` - initializes with full tracing
-  - `agent_span()` - context manager for gen_ai.invoke_agent spans
-  - `trace_tool()` - decorator for gen_ai.execute_tool spans
-  - `TASK_AGENT_MAP` - maps task names to agent display names
-- Instrumented all 4 tools with `@trace_tool` decorator
-- Updated `main.py` to run tasks individually wrapped in agent-level Sentry spans
+- Created monitoring.py with init_sentry, agent_span, trace_tool, TASK_AGENT_MAP
+- Added @trace_tool decorator to all 4 tools
+- Updated main.py to wrap tasks in gen_ai.invoke_agent spans
 - Added task callbacks for Sentry breadcrumbs
-- Ran pipeline 2x with instrumentation — traces sent to Sentry
+- Ran pipeline 2x, BEFORE traces sent to Sentry
 
-### Sentry trace structure achieved:
-```
-Transaction: "Security Posture Scan" (62s)
-├── gen_ai.invoke_agent: ResourceDiscovery (17.6s)
-│   └── gen_ai.execute_tool: aws_resource_scanner
-├── gen_ai.invoke_agent: SecurityScanner (22.6s)  ← BOTTLENECK
-│   ├── gen_ai.execute_tool: security_group_analyzer
-│   ├── gen_ai.execute_tool: s3_config_checker
-│   └── gen_ai.execute_tool: iam_analyzer
-├── gen_ai.invoke_agent: ComplianceChecker (7.1s)
-├── gen_ai.invoke_agent: RiskScorer (4.7s)
-└── gen_ai.invoke_agent: RemediationPlanner (10.0s)
-```
-
-### BEFORE metrics (with bug):
-| Agent | Time | Notes |
-|-------|------|-------|
-| ResourceDiscovery | 17.6s | |
-| SecurityScanner | 22.6s | ← 36% of total pipeline |
-| ComplianceChecker | 7.1s | |
-| RiskScorer | 4.7s | |
-| RemediationPlanner | 10.0s | |
-| **Total** | **62.0s** | |
+### BEFORE metrics:
+- ResourceDiscovery: 17.6s
+- SecurityScanner: 22.6s (36% of total, BOTTLENECK)
+- ComplianceChecker: 7.1s
+- RiskScorer: 4.7s
+- RemediationPlanner: 10.0s
+- Total: 62.0s
 
 ---
 
-## ✅ Day 3 (July 15) - Bug Fix + Before/After Comparison
+## Done: Day 3 (July 15) - Bug Fix
 
-### The Bug:
-`IAMAnalyzer` tool fetched ALL 90 IAM roles (59 auditable after filtering service-linked),
-producing 26,980 chars of JSON output. This overwhelmed the LLM context window,
-causing the SecurityScanner agent to take disproportionately long.
+### Bug:
+IAMAnalyzer fetches ALL 90 roles (59 auditable), produces 26,980 chars.
+Overwhelms LLM context, SecurityScanner retries.
 
-### The Fix (in `iam_analyzer.py`):
-1. **Pagination**: Only analyze top 20 most-recently-used roles (was: all 59)
-2. **Sort by relevance**: Roles sorted by `RoleLastUsed` date (most active first)
-3. **Skip service-linked**: 31 roles auto-skipped (can't modify anyway)
-4. **Token budget guard**: Truncates `role_summary` if output > 4000 chars
+### Fix in iam_analyzer.py:
+1. Pagination: top 20 most-recently-used roles
+2. Sort by RoleLastUsed date
+3. Skip 31 service-linked roles
+4. Token budget guard: truncate if > 4000 chars
 
-### AFTER metrics (with fix):
-| Agent | Time | Improvement |
-|-------|------|-------------|
-| ResourceDiscovery | 17.3s | ~same |
-| SecurityScanner | 17.8s | **21% faster** |
-| ComplianceChecker | 5.7s | 20% faster |
-| RiskScorer | 2.8s | 40% faster |
-| RemediationPlanner | 9.8s | ~same |
-| **Total** | **57.7s** | **7% faster** |
+### AFTER metrics:
+- IAM tool output: 26,980 to 15,532 chars (42% smaller)
+- SecurityScanner: 22.6s to 17.8s (21% faster)
+- IAM API calls: 59 to 20 (66% fewer)
+- Total pipeline: 62.0s to 57.7s (7% faster)
+- Findings: 27 both before and after (no coverage loss)
 
-### Quantified improvements:
-- IAM tool output: 26,980 → 15,532 chars (**42% smaller**)
-- IAM API calls: 59 → 20 role policy lookups (**66% fewer**)
-- SecurityScanner avg: 22.6s → 19.9s (**12% faster**)
-- Findings unchanged: 27 findings (no coverage loss)
-
-### Runs sent to Sentry (for screenshots):
-1. Before fix run 1: ~66.6s (SecurityScanner: 22.6s)
-2. Before fix run 2: ~62.0s (SecurityScanner: 22.6s)
-3. After fix run 1: ~57.3s (SecurityScanner: 17.8s)
-4. After fix run 2: ~62.6s (SecurityScanner: 21.9s)
-5. After fix run 3: ~56.0s (SecurityScanner: 18.0s)
-6. After fix run 4: ~57.7s (SecurityScanner: 22.1s)
-7. After fix run 5: ~56.0s (SecurityScanner: 18.4s)
+### Sentry runs captured:
+- Before fix: 2 runs
+- After fix: 5 runs
 
 ---
 
-## ✅ Day 4 (July 15) - Streamlit UI + GitHub
+## Done: Day 4 (July 15) - Streamlit UI + GitHub
 
-### What was done:
-- Built Streamlit dashboard (`streamlit_app.py`):
-  - Dark theme with gradient header
-  - Live agent progress cards (⏳ → 🔄 → ✅ with timing)
-  - Color-coded severity cards (Critical/High/Medium/Low)
+- Built streamlit_app.py:
+  - Dark gradient header, accent color
+  - Live agent progress cards with timing
+  - Color-coded severity cards
   - Architecture diagram in sidebar
-  - Sentry connection status
-  - Expandable output sections per agent
+  - Sentry status indicator
+  - Expandable outputs per agent
   - Download report button
   - Footer with attribution
-- Initialized git repo with proper commit history
-- Created GitHub repo: https://github.com/simplynadaf/aws-security-posture-agent
-- Added SSH key to EC2 for GitHub push access
-- Pushed 3 commits:
-  1. `feat: multi-agent AWS security posture scanner with Sentry AI monitoring`
-  2. `feat: add Streamlit UI, README, and project documentation`
-  3. `ui: improve Streamlit dashboard with dark theme, agent progress cards`
-- Created `docs/METRICS-COMPARISON.md` with full before/after data
-- Created `README.md` with architecture, setup, and tech stack
+- Created README.md, .env.example, docs/METRICS-COMPARISON.md
+- Initialized git, added SSH key to GitHub
+- Pushed 5 commits to https://github.com/simplynadaf/aws-security-posture-agent
 
 ---
 
-## 🔲 Day 5 (Pending) - Write Submissions
+## Done: Day 5 (July 15) - Submissions Drafted
 
-### Submission 1: Clear the Lineup + Best Use of Sentry ($500)
-- Title TBD
-- Tags: devchallenge, bugsmash, ai, aws
-- Include: PR link, Sentry screenshots, before/after metrics, architecture
+### Submission 1: Clear the Lineup + Sentry Prize
+- Title: Sentry's AI Agent Monitoring Caught a Token Explosion in My 5-Agent AWS Security Scanner
+- File: docs/submissions/submission-1-clear-the-lineup.md
+- Words: 1,247
+- Quality: zero em dashes, zero AI tell-words, zero banned phrases
+- Placeholders: SCREENSHOT x2, COVER_IMAGE_URL x1
 
-### Submission 2: Smash Stories ($200)
-- Title TBD (AgentCore debugging saga from Article 3)
-- Tags: devchallenge, bugsmash, ai, aws
-- Source: /home/ubuntu/agentic-ai/articles/article-3-agentcore-deployment/testing-report.md
+### Submission 2: Smash Stories
+- Title: 4 Silent Failures, 2 Undocumented APIs, and a Container That Crashed Because of a Missing User Directive
+- File: docs/submissions/submission-2-smash-stories.md
+- Words: 1,290
+- Quality: zero em dashes, zero AI tell-words, zero banned phrases
+- Placeholders: COVER_IMAGE_URL x1
 
 ---
 
-## 📋 Outstanding Items (For Sarvar)
+## Done: Recording Tools Installed on EC2
 
-### Screenshots needed from Sentry:
-1. [ ] Trace waterfall BEFORE fix (SecurityScanner = longest span)
-2. [ ] Trace waterfall AFTER fix (all spans proportional)
-3. [ ] AI Agents view (if available) showing token usage per agent
-4. [ ] Seer RCA (if available in trial)
+### Approach 1 - Puppeteer + Xvfb + ffmpeg (video WITH audio):
+- Xvfb: /usr/bin/Xvfb
+- ffmpeg: /usr/bin/ffmpeg
+- Node.js: v20.20.2
+- Puppeteer: npm installed, Chrome at ~/.cache/puppeteer/chrome/linux-148.0.7778.97/chrome-linux64/chrome
+- PulseAudio: available
+- Script: take-screenshots.js in project root
 
-### Screenshots needed from Streamlit:
-5. [ ] UI with scan results displayed (run app on port 8501)
+### Approach 2 - Playwright (built-in video, NO Xvfb needed):
+- Playwright: 1.61.0 (pip3 install --break-system-packages playwright)
+- Chromium: ~/.cache/ms-playwright/chromium-1228
+- ffmpeg: ~/.cache/ms-playwright/ffmpeg-1011
+- Python API: from playwright.sync_api import sync_playwright
 
-### To access Streamlit:
-```bash
-# Open port 8501 in security group sg-de63a5eb first, then:
-ssh -i test.pem ubuntu@REDACTED_IP
-cd /home/ubuntu/security-posture-agent
-source .venv/bin/activate
-streamlit run streamlit_app.py --server.address 0.0.0.0 --server.port 8501
-# Visit: http://REDACTED_IP:8501
-```
+### When to use which:
+- Screenshots only: Playwright (simpler, headless works)
+- Video without audio: Playwright (built-in record_video_dir)
+- Video WITH audio: Puppeteer + Xvfb + ffmpeg + PulseAudio
+
+### Skill documentation:
+- /home/ubuntu/.kiro/skills/demo-recording/SKILL.md (covers both approaches)
+
+---
+
+## Outstanding (For Sarvar)
+
+### Screenshots needed:
+- [ ] Sentry trace waterfall BEFORE fix (Performance, Traces)
+- [ ] Sentry trace waterfall AFTER fix
+- [ ] Sentry AI Agents view (Insights, if available)
+- [ ] Streamlit UI with results (can capture with Playwright)
+
+### Before publishing:
+- [ ] Replace SCREENSHOT placeholders in submission 1
+- [ ] Replace COVER_IMAGE_URL in both submissions
+- [ ] Add personal touches to articles
+- [ ] Create cover images (Canva dark theme)
+- [ ] Publish both on Dev.to
+- [ ] Self-react (heart + unicorn + bookmark)
+- [ ] Post first comment on each
+- [ ] Share on LinkedIn (link in first comment)
 
 ### Events:
-- [ ] July 30: Attend Sentry Live Demo & Q&A (11am PT / 11:30pm IST)
-- [ ] Ask about AI agent monitoring with custom frameworks
+- [ ] July 30: Attend Sentry Live Demo and Q&A (11am PT / 11:30pm IST)
+- [ ] Ask about AI agent monitoring with custom frameworks like CrewAI
 
 ---
 
-## 📁 File Inventory
+## File Inventory
 
-| File | Location (EC2) | Purpose |
-|------|---------------|---------|
-| main.py | src/security_posture/main.py | Entry point + Sentry transaction |
-| crew.py | src/security_posture/crew.py | 5-agent crew orchestration |
-| monitoring.py | src/security_posture/monitoring.py | Sentry AI monitoring helpers |
-| agents.yaml | src/security_posture/config/agents.yaml | Agent definitions |
-| tasks.yaml | src/security_posture/config/tasks.yaml | Task definitions |
-| aws_resource_scanner.py | src/security_posture/tools/ | EC2/S3/Lambda/IAM/SG/APIGW/DDB scanner |
-| security_group_analyzer.py | src/security_posture/tools/ | SG rule analysis |
-| s3_config_checker.py | src/security_posture/tools/ | S3 encryption/versioning/PAB |
-| iam_analyzer.py | src/security_posture/tools/ | IAM role/user analysis (FIXED) |
-| streamlit_app.py | ./streamlit_app.py | Web dashboard |
-| README.md | ./README.md | GitHub repo documentation |
-| METRICS-COMPARISON.md | docs/ | Before/after performance data |
-| PROGRESS-LOG.md | docs/ | This file |
-| .env | ./ | Sentry DSN + config (gitignored) |
-| pyproject.toml | ./ | Dependencies + project metadata |
+### Source Code (src/security_posture/):
+- main.py: Entry point + Sentry transaction + agent spans
+- crew.py: 5-agent crew orchestration with Bedrock Nova Pro
+- monitoring.py: Sentry AI monitoring helpers
+- config/agents.yaml: 5 agent definitions
+- config/tasks.yaml: 5 task definitions
+- tools/__init__.py: Tool exports
+- tools/aws_resource_scanner.py: Multi-service resource inventory
+- tools/security_group_analyzer.py: SG rule analysis
+- tools/s3_config_checker.py: S3 security config
+- tools/iam_analyzer.py: IAM analysis (FIXED: paginated, sorted, budget guard)
+
+### UI and Config:
+- streamlit_app.py: Web dashboard
+- pyproject.toml: Dependencies
+- .env: Sentry DSN + AWS config (gitignored)
+- .env.example: Template
+- README.md: GitHub documentation
+- .gitignore: Excludes venv, env, pycache, reports
+
+### Documentation (docs/):
+- PROGRESS-LOG.md: This file
+- METRICS-COMPARISON.md: Before/after performance data
+- submissions/submission-1-clear-the-lineup.md: Article draft 1
+- submissions/submission-2-smash-stories.md: Article draft 2
+- sentry-screenshots/: For trace screenshots
+
+### Recording (not committed):
+- take-screenshots.js: Puppeteer screenshot script
+- package.json: Node deps
+- node_modules/: gitignored
 
 ---
 
-## 🔑 Access Details
+## Access
 
-| Resource | Details |
-|----------|---------|
-| EC2 | `ssh -i test.pem ubuntu@REDACTED_IP` |
-| GitHub | https://github.com/simplynadaf/aws-security-posture-agent |
-| Sentry | https://sentry.io (project: security-posture-agent) |
-| AWS Account | REDACTED_ACCOUNT (us-east-1) |
-| Sentry DSN | Configured in .env on EC2 |
+- EC2 SSH: ssh -i test.pem ubuntu@REDACTED_IP
+- GitHub: https://github.com/simplynadaf/aws-security-posture-agent
+- GitHub SSH key: ed25519 bug-smash-agent-ec2 added to GitHub account
+- Sentry: project security-posture-agent, DSN in .env on EC2
+- Sentry promo: bugsmash26, $100 credits + 14-day trial
+- AWS Account: REDACTED_ACCOUNT, us-east-1
+- AWS creds: ~/.aws/credentials on EC2
+
+---
+
+## Challenge Rules Compliance
+
+- Development started during entry period (July 15): YES
+- Original creation: YES
+- Tags devchallenge + bugsmash: YES in both articles
+- English only: YES
+- Individual, no teams: YES
+- Fork merge counts, own repo: YES
+- Multiple submissions, separate posts: YES, doing 2
+- Clear the Lineup eligible for Sentry prize: YES
+- Smash Stories eligible for writing prize: YES
+
+---
+
+## Key Dates
+
+- July 15: All development complete
+- July 15: Articles drafted
+- July 20-21: Target publish date
+- July 30: Sentry Live Demo (11am PT)
+- August 23: Submission deadline
+- September 17: Winners announced
+
+---
+
+## Prize Targets
+
+- Best Use of Sentry: $500 + Skateboard + DEV++ (Submission 1)
+- Smash Stories: $200 + DEV++ (Submission 2)
+- Completion Badge: both submissions
+- Total possible: $700 + DEV++
