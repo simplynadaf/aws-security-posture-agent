@@ -327,21 +327,26 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### 🏗️ Pipeline Architecture")
     st.code("""
-┌─────────────────────┐
-│ 1. ResourceDiscovery │
-│    └─ aws_scanner    │
-├─────────────────────┤
-│ 2. SecurityScanner   │
-│    ├─ sg_analyzer    │
-│    ├─ s3_checker     │
-│    └─ iam_analyzer   │
-├─────────────────────┤
-│ 3. ComplianceChecker │
-├─────────────────────┤
-│ 4. RiskScorer        │
-├─────────────────────┤
-│ 5. RemediationPlanner│
-└─────────────────────┘
+┌──────────────────────┐
+│ 1. ResourceDiscovery  │
+│    └─ aws_scanner     │
+├──────────────────────┤
+│ 2. SecurityScanner    │
+│    ├─ sg_analyzer     │
+│    ├─ s3_checker      │
+│    ├─ iam_analyzer    │
+│    ├─ ec2_checker     │
+│    └─ lambda_checker  │
+├──────────────────────┤
+│ 3. ComplianceChecker  │
+│    └─ CIS Benchmarks  │
+├──────────────────────┤
+│ 4. RiskScorer         │
+│    └─ CVSS-style      │
+├──────────────────────┤
+│ 5. RemediationPlanner │
+│    └─ AWS CLI fixes   │
+└──────────────────────┘
     """, language=None)
 
     st.markdown("---")
@@ -364,32 +369,42 @@ st.markdown("")
 
 # What it scans section
 with st.expander("ℹ️ What does this agent check?", expanded=False):
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
         st.markdown("""
-        **🖥️ Compute & Network**
+        **🖥️ Compute**
         - EC2 instance profiles
-        - Security group rules
-        - Open ports (SSH, RDP, DB)
-        - Default SG misuse
-        - Stale launch-wizard SGs
+        - Unencrypted EBS
+        - Public IPs exposed
+        - Default SG attached
+        - Stopped instances
         """)
     with c2:
         st.markdown("""
+        **🌐 Network**
+        - Open ports (SSH, RDP, DB)
+        - Wide port ranges
+        - Default SG rules
+        - Stale launch-wizard SGs
+        """)
+    with c3:
+        st.markdown("""
         **🪣 Storage**
-        - S3 default encryption
+        - S3 encryption
         - Bucket versioning
         - Public access blocks
         - Bucket policies
         """)
-    with c3:
+    with c4:
         st.markdown("""
-        **🔑 Identity & Access**
+        **🔑 Identity + Serverless**
         - AdminAccess roles
         - Users without MFA
-        - Access key rotation
-        - Direct policy attachments
-        - CIS Benchmark mapping
+        - Key rotation
+        - Lambda runtimes
+        - Lambda role perms
+        - Missing DLQs
+        """)
         """)
 
 st.markdown("")
