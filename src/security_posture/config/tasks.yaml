@@ -1,0 +1,96 @@
+resource_discovery_task:
+  description: >
+    Scan the AWS account and produce a complete inventory of resources.
+    Use the aws_resource_scanner tool to discover resources across these services:
+    EC2, S3, Lambda, IAM (roles and users), Security Groups, API Gateway, DynamoDB.
+
+    For each resource, capture: resource_id, resource_type, name/tags, region, key configuration details.
+
+    Organize the output by service type. Include counts per service.
+  expected_output: >
+    A structured inventory organized by service with resource IDs, names, and key metadata.
+    Format as clear sections per service with bullet points. Include total resource count.
+  agent: resource_discovery
+
+security_scanning_task:
+  description: >
+    Analyze the discovered resources for security misconfigurations.
+    Use the security_group_analyzer tool to check security groups for dangerous rules.
+    Use the s3_config_checker tool to verify S3 bucket security settings.
+    Use the iam_analyzer tool to check IAM roles and users for overly permissive access.
+
+    Check for these common issues:
+    - Security groups with 0.0.0.0/0 ingress on sensitive ports
+    - Default security groups attached to running resources
+    - S3 buckets without encryption, versioning, or public access blocks
+    - IAM roles with AdministratorAccess or wildcard (*) permissions
+    - IAM users without MFA
+    - Stale/unused resources (launch-wizard security groups, old roles)
+
+    For each finding, document: resource_id, issue_description, current_configuration, expected_configuration, evidence.
+  expected_output: >
+    A list of security findings. Each finding must include: resource_id, issue type,
+    description of the misconfiguration, what the current config is, and what it should be.
+    Format as a numbered list of findings with clear subsections.
+  agent: security_scanner
+
+compliance_check_task:
+  description: >
+    Take the security findings and map each one to relevant compliance frameworks.
+
+    For each finding, identify:
+    - CIS AWS Foundations Benchmark control ID (e.g., CIS 2.1.1, CIS 4.1)
+    - AWS Well-Architected Security Pillar best practice
+    - Whether it's a compliance VIOLATION (must fix) or a RECOMMENDATION (should fix)
+    - Business impact if left unresolved
+
+    Reference specific CIS control numbers where applicable.
+  expected_output: >
+    Each finding mapped to compliance frameworks with: CIS control ID, compliance status
+    (VIOLATION or RECOMMENDATION), framework reference, and business impact statement.
+    Format as a table or structured list.
+  agent: compliance_checker
+
+risk_scoring_task:
+  description: >
+    Score each security finding using a quantitative risk framework.
+
+    For each finding, assess:
+    - Severity (1-10): How bad is this if exploited?
+    - Blast Radius (1-10): How many resources/users are affected?
+    - Exploitability (1-10): How easy is it for an attacker to exploit?
+    - Risk Score: (Severity + Blast Radius + Exploitability) / 3, rounded to 1 decimal
+
+    Then rank all findings by risk score (highest first) and assign priority:
+    - CRITICAL: score >= 8
+    - HIGH: score >= 6
+    - MEDIUM: score >= 4
+    - LOW: score < 4
+
+    Also calculate an overall account posture score (0-100) where 100 is fully secure.
+  expected_output: >
+    A risk matrix with each finding scored on severity, blast radius, and exploitability.
+    Include composite risk score and priority level. End with overall posture score (0-100).
+    Format as a ranked table, highest risk first.
+  agent: risk_scorer
+
+remediation_planning_task:
+  description: >
+    Generate a prioritized remediation plan for all findings, ordered by risk score.
+
+    For each finding provide:
+    1. One-line summary of what to fix
+    2. Exact AWS CLI command to remediate (copy-paste ready)
+    3. Effort estimate (Quick Win = <5 min, Medium = 5-30 min, Heavy = 30+ min)
+    4. Risk of the fix itself (will this break anything?)
+    5. Dependencies (does this fix need to happen before/after another?)
+
+    Group into:
+    - IMMEDIATE (do today): Critical findings, quick wins
+    - THIS WEEK: High findings, medium effort
+    - PLAN: Medium findings, requires change management
+  expected_output: >
+    A prioritized action plan grouped by urgency (IMMEDIATE, THIS WEEK, PLAN).
+    Each item includes: finding summary, AWS CLI fix command, effort estimate,
+    and risk notes. Commands must be copy-paste ready.
+  agent: remediation_planner
