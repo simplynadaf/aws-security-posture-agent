@@ -15,17 +15,22 @@ resource_discovery_task:
 security_scanning_task:
   description: >
     Analyze the discovered resources for security misconfigurations.
-    Use the security_group_analyzer tool to check security groups for dangerous rules.
-    Use the s3_config_checker tool to verify S3 bucket security settings.
-    Use the iam_analyzer tool to check IAM roles and users for overly permissive access.
+    Use ALL available security tools:
+    - security_group_analyzer: check security groups for dangerous rules
+    - s3_config_checker: verify S3 bucket security settings
+    - iam_analyzer: check IAM roles and users for overly permissive access
+    - ec2_security_checker: check EC2 instances and EBS volumes for security issues
+    - lambda_security_checker: check Lambda functions for runtime, role, and config issues
 
     Check for these common issues:
     - Security groups with 0.0.0.0/0 ingress on sensitive ports
     - Default security groups attached to running resources
     - S3 buckets without encryption, versioning, or public access blocks
-    - IAM roles with AdministratorAccess or wildcard (*) permissions
+    - IAM roles with AdministratorAccess or wildcard permissions
     - IAM users without MFA
-    - Stale/unused resources (launch-wizard security groups, old roles)
+    - EC2 instances without IAM profiles or with unencrypted EBS volumes
+    - Lambda functions with deprecated runtimes or overly permissive roles
+    - Lambda functions without Dead Letter Queues
 
     For each finding, document: resource_id, issue_description, current_configuration, expected_configuration, evidence.
   expected_output: >

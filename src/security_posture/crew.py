@@ -12,6 +12,8 @@ from security_posture.tools import (
     SecurityGroupAnalyzer,
     S3ConfigChecker,
     IAMAnalyzer,
+    EC2SecurityChecker,
+    LambdaSecurityChecker,
 )
 from security_posture.monitoring import TASK_AGENT_MAP
 
@@ -25,7 +27,6 @@ bedrock_llm = LLM(
 def _make_task_callback(agent_name: str):
     """Create a task callback that records agent completion metrics in Sentry."""
     def callback(output):
-        # Log token usage summary to Sentry as a breadcrumb
         sentry_sdk.add_breadcrumb(
             category="agent",
             message=f"Agent '{agent_name}' completed task",
@@ -62,6 +63,8 @@ class SecurityPosture():
                 SecurityGroupAnalyzer(),
                 S3ConfigChecker(),
                 IAMAnalyzer(),
+                EC2SecurityChecker(),
+                LambdaSecurityChecker(),
             ],
             llm=bedrock_llm,
             verbose=True,
