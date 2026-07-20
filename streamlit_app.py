@@ -7,6 +7,7 @@ import json
 import time
 import os
 import sys
+import re
 
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
@@ -18,7 +19,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Custom CSS for better styling
+# Custom CSS
 st.markdown("""
 <style>
     .main-header {
@@ -38,30 +39,52 @@ st.markdown("""
         margin: 0.5rem 0 0 0;
         font-size: 1rem;
     }
-    .metric-card {
-        background: #1a1a2e;
-        border: 1px solid #1f4068;
+    .posture-score {
+        text-align: center;
+        padding: 1.5rem;
+        border-radius: 12px;
+        margin: 1rem 0;
+    }
+    .posture-score .score {
+        font-size: 3.5rem;
+        font-weight: bold;
+    }
+    .posture-score .label {
+        font-size: 1rem;
+        margin-top: 0.3rem;
+    }
+    .severity-card {
+        text-align: center;
         border-radius: 10px;
         padding: 1.2rem;
+        margin: 0.3rem;
+    }
+    .severity-card .count {
+        font-size: 2.2rem;
+        font-weight: bold;
+    }
+    .severity-card .label {
+        font-size: 0.85rem;
+        margin-top: 0.2rem;
+    }
+    .agent-card {
         text-align: center;
+        padding: 0.8rem;
+        border-radius: 8px;
+        border: 1px solid #333;
+        min-height: 90px;
     }
-    .severity-critical { color: #ff4757; font-weight: bold; }
-    .severity-high { color: #ff6b35; font-weight: bold; }
-    .severity-medium { color: #ffa502; font-weight: bold; }
-    .severity-low { color: #70a1ff; font-weight: bold; }
-    .agent-badge {
+    .agent-card .icon { font-size: 1.5rem; }
+    .agent-card .name { font-size: 0.7rem; color: #888; margin-top: 0.2rem; }
+    .agent-card .status { font-size: 0.8rem; margin-top: 0.3rem; }
+    .resource-pill {
         display: inline-block;
-        padding: 0.2rem 0.6rem;
-        border-radius: 4px;
-        font-size: 0.8rem;
-        font-weight: 600;
+        background: #1a1a2e;
+        border: 1px solid #1f4068;
+        border-radius: 20px;
+        padding: 0.3rem 0.8rem;
         margin: 0.2rem;
-    }
-    .scan-btn button {
-        background: linear-gradient(135deg, #e94560, #c23152) !important;
-        border: none !important;
-        font-size: 1.1rem !important;
-        padding: 0.8rem 2rem !important;
+        font-size: 0.85rem;
     }
     div[data-testid="stMetric"] {
         background: #0e1117;
@@ -74,6 +97,42 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+
+def parse_findings_from_output(output_text):
+    """Parse security findings from agent output to get structured counts."""
+    counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+
+    for sev in counts:
+        pattern = r'"severity":\s*"' + sev + r'"'
+        matches = re.findall(pattern, output_text, re.IGNORECASE)
+        if matches:
+            counts[sev] = len(matches)
+
+    return counts
+
+
+def parse_resources_from_output(output_text):
+    """Try to extract resource counts from ResourceDiscovery output."""
+    resources = {}
+
+    service_patterns = [
+        ("EC2 Instances", r'"ec2".*?"count":\s*(\d+)'),
+        ("S3 Buckets", r'"s3".*?"count":\s*(\d+)'),
+        ("Lambda Functions", r'"lambda".*?"count":\s*(\d+)'),
+        ("Security Groups", r'"security_groups".*?"count":\s*(\d+)'),
+        ("IAM Roles", r'"iam_roles".*?"count":\s*(\d+)'),
+        ("IAM Users", r'"iam_users".*?"count":\s*(\d+)'),
+        ("API Gateways", r'"api_gateway".*?"count":\s*(\d+)'),
+        ("DynamoDB Tables", r'"dynamodb".*?"count":\s*(\d+)'),
+    ]
+
+    for name, pattern in service_patterns:
+        match = re.search(pattern, output_text, re.DOTALL | re.IGNORECASE)
+        if match:
+            resources[name] = int(match.group(1))
+
+    return resources
 
 
 def run_scan():
@@ -90,24 +149,38 @@ def run_scan():
 
     agent_names = list(TASK_AGENT_MAP.values())
     agent_icons = ["🗺️", "🔍", "📋", "⚡", "🔧"]
+    agent_descriptions = [
+        "Inventory resources",
+        "Find vulnerabilities",
+        "Map to CIS benchmarks",
+        "Score risk levels",
+        "Generate fix commands",
+    ]
     agent_timings = {}
     agent_outputs = {}
 
-    # Progress display
+    # Progress section
+    st.markdown("### 🚀 Scan in progress")
     progress_bar = st.progress(0)
     status_text = st.empty()
-    agent_status = st.container()
 
-    cols = agent_status.columns(5)
-    status_placeholders = []
-    for i, (icon, name) in enumerate(zip(agent_icons, agent_names)):
+    # Agent progress cards
+    agent_container = st.container()
+    cols = agent_container.columns(5)
+    placeholders = []
+    for i, (icon, name, desc) in enumerate(zip(agent_icons, agent_names, agent_descriptions)):
         with cols[i]:
             ph = st.empty()
-            ph.markdown(f"<div style='text-align:center;padding:0.5rem;border:1px solid #333;border-radius:8px;'>"
-                       f"<div style='font-size:1.5rem;'>{icon}</div>"
-                       f"<div style='font-size:0.7rem;color:#666;'>{name}</div>"
-                       f"<div style='font-size:0.8rem;'>⏳</div></div>", unsafe_allow_html=True)
-            status_placeholders.append(ph)
+            ph.markdown(
+                f"<div class='agent-card'>"
+                f"<div class='icon'>{icon}</div>"
+                f"<div class='name'>{name}</div>"
+                f"<div style='font-size:0.65rem;color:#555;'>{desc}</div>"
+                f"<div class='status'>⏳ Waiting</div>"
+                f"</div>", unsafe_allow_html=True)
+            placeholders.append(ph)
+
+    st.markdown("")
 
     with sentry_sdk.start_transaction(op="security_scan", name="Security Posture Scan") as txn:
         txn.set_data("pipeline.agents_count", 5)
@@ -126,16 +199,17 @@ def run_scan():
                 task_name = task_names_list[i] if i < len(task_names_list) else f"task_{i}"
                 agent_name = TASK_AGENT_MAP.get(task_name, f"Agent_{i+1}")
 
-                progress_pct = int((i / total_tasks) * 100)
-                progress_bar.progress(progress_pct)
-                status_text.markdown(f"**🤖 Running {agent_name}...**")
+                progress_bar.progress(int((i / total_tasks) * 100))
+                status_text.markdown(f"**🤖 {agent_name}** is analyzing...")
 
-                # Update agent card to "running"
-                status_placeholders[i].markdown(
-                    f"<div style='text-align:center;padding:0.5rem;border:1px solid #e94560;border-radius:8px;background:#1a1a2e;'>"
-                    f"<div style='font-size:1.5rem;'>{agent_icons[i]}</div>"
-                    f"<div style='font-size:0.7rem;color:#e94560;'>{agent_name}</div>"
-                    f"<div style='font-size:0.8rem;'>🔄 Running...</div></div>", unsafe_allow_html=True)
+                # Mark as running
+                placeholders[i].markdown(
+                    f"<div class='agent-card' style='border-color:#e94560;background:#1a1a2e;'>"
+                    f"<div class='icon'>{agent_icons[i]}</div>"
+                    f"<div class='name' style='color:#e94560;'>{agent_name}</div>"
+                    f"<div style='font-size:0.65rem;color:#e94560;'>{agent_descriptions[i]}</div>"
+                    f"<div class='status'>🔄 Running...</div>"
+                    f"</div>", unsafe_allow_html=True)
 
                 with start_span(op="gen_ai.invoke_agent", name=f"invoke_agent {agent_name}") as span:
                     span.set_data("gen_ai.operation.name", "invoke_agent")
@@ -155,13 +229,16 @@ def run_scan():
                     agent_outputs[agent_name] = str(task_output)
 
                     span.set_data("duration_seconds", round(elapsed, 2))
+                    span.set_data("output_length_chars", len(str(task_output)))
 
-                # Update agent card to "done"
-                status_placeholders[i].markdown(
-                    f"<div style='text-align:center;padding:0.5rem;border:1px solid #2ed573;border-radius:8px;'>"
-                    f"<div style='font-size:1.5rem;'>{agent_icons[i]}</div>"
-                    f"<div style='font-size:0.7rem;color:#2ed573;'>{agent_name}</div>"
-                    f"<div style='font-size:0.8rem;'>✅ {elapsed:.1f}s</div></div>", unsafe_allow_html=True)
+                # Mark as done
+                placeholders[i].markdown(
+                    f"<div class='agent-card' style='border-color:#2ed573;'>"
+                    f"<div class='icon'>{agent_icons[i]}</div>"
+                    f"<div class='name' style='color:#2ed573;'>{agent_name}</div>"
+                    f"<div style='font-size:0.65rem;color:#2ed573;'>{agent_descriptions[i]}</div>"
+                    f"<div class='status'>✅ {elapsed:.1f}s</div>"
+                    f"</div>", unsafe_allow_html=True)
 
             # Write report
             if task_outputs:
@@ -187,111 +264,164 @@ def run_scan():
             return None
 
 
-def display_results(results: dict):
-    """Display scan results in the dashboard."""
+def display_results(results):
+    """Display scan results."""
     st.markdown("---")
 
-    # Top-level metrics
-    st.subheader("📊 Scan Summary")
-    m1, m2, m3, m4 = st.columns(4)
-    with m1:
-        st.metric("⏱️ Total Time", f"{results['total_time']:.0f}s")
-    with m2:
-        st.metric("🤖 Agents Run", "5")
-    with m3:
-        slowest = max(results["timings"], key=results["timings"].get)
-        st.metric("🐌 Slowest", f"{slowest} ({results['timings'][slowest]}s)")
-    with m4:
-        fastest = min(results["timings"], key=results["timings"].get)
-        st.metric("⚡ Fastest", f"{fastest} ({results['timings'][fastest]}s)")
-
-    # Agent performance chart
-    st.markdown("---")
-    st.subheader("⏱️ Agent Execution Times")
-
-    chart_data = {name: [timing] for name, timing in results["timings"].items()}
-    st.bar_chart(results["timings"], color="#e94560")
-
-    # Findings summary
-    st.markdown("---")
-    st.subheader("🚨 Security Findings")
-
-    if "SecurityScanner" in results["outputs"]:
-        scanner_out = results["outputs"]["SecurityScanner"]
-
-        # Count findings by severity
-        critical = scanner_out.upper().count("CRITICAL")
-        high = scanner_out.upper().count("\"HIGH\"") + scanner_out.upper().count("'HIGH'")
-        medium = scanner_out.upper().count("\"MEDIUM\"") + scanner_out.upper().count("'MEDIUM'")
-        low = scanner_out.upper().count("\"LOW\"") + scanner_out.upper().count("'LOW'")
-
-        f1, f2, f3, f4 = st.columns(4)
-        with f1:
-            st.markdown(f"""
-            <div style='text-align:center;background:#2d1f1f;border:2px solid #ff4757;border-radius:10px;padding:1rem;'>
-                <div style='font-size:2rem;color:#ff4757;font-weight:bold;'>{critical}</div>
-                <div style='color:#ff4757;font-size:0.9rem;'>Critical</div>
-            </div>""", unsafe_allow_html=True)
-        with f2:
-            st.markdown(f"""
-            <div style='text-align:center;background:#2d2117;border:2px solid #ff6b35;border-radius:10px;padding:1rem;'>
-                <div style='font-size:2rem;color:#ff6b35;font-weight:bold;'>{high}</div>
-                <div style='color:#ff6b35;font-size:0.9rem;'>High</div>
-            </div>""", unsafe_allow_html=True)
-        with f3:
-            st.markdown(f"""
-            <div style='text-align:center;background:#2d2a17;border:2px solid #ffa502;border-radius:10px;padding:1rem;'>
-                <div style='font-size:2rem;color:#ffa502;font-weight:bold;'>{medium}</div>
-                <div style='color:#ffa502;font-size:0.9rem;'>Medium</div>
-            </div>""", unsafe_allow_html=True)
-        with f4:
-            st.markdown(f"""
-            <div style='text-align:center;background:#1a2233;border:2px solid #70a1ff;border-radius:10px;padding:1rem;'>
-                <div style='font-size:2rem;color:#70a1ff;font-weight:bold;'>{low}</div>
-                <div style='color:#70a1ff;font-size:0.9rem;'>Low</div>
-            </div>""", unsafe_allow_html=True)
-
-        st.markdown("")
-        with st.expander("📋 Full Security Scanner Output"):
-            st.markdown(scanner_out[:6000])
-
-    # Compliance
-    if "ComplianceChecker" in results["outputs"]:
-        st.markdown("---")
-        st.subheader("📜 Compliance Mapping")
-        with st.expander("CIS AWS Foundations Benchmark Mapping", expanded=False):
-            st.markdown(results["outputs"]["ComplianceChecker"][:6000])
-
-    # Risk Assessment
+    # === POSTURE SCORE ===
+    posture_score = 20
     if "RiskScorer" in results["outputs"]:
-        st.markdown("---")
-        st.subheader("⚡ Risk Assessment")
-        with st.expander("Risk Scoring Details", expanded=False):
-            st.markdown(results["outputs"]["RiskScorer"][:6000])
+        score_match = re.search(
+            r"(?:posture|overall).*?(\d{1,2})\s*/?\s*100",
+            results["outputs"]["RiskScorer"], re.IGNORECASE)
+        if score_match:
+            posture_score = int(score_match.group(1))
 
-    # Remediation Plan
-    if "RemediationPlanner" in results["outputs"]:
-        st.markdown("---")
-        st.subheader("🔧 Remediation Plan")
-        st.markdown(results["outputs"]["RemediationPlanner"][:8000])
+    if posture_score >= 80:
+        score_color, score_bg, score_label = "#2ed573", "#1a2e1f", "STRONG"
+    elif posture_score >= 60:
+        score_color, score_bg, score_label = "#ffa502", "#2e2a1a", "MODERATE"
+    elif posture_score >= 40:
+        score_color, score_bg, score_label = "#ff6b35", "#2e211a", "WEAK"
+    else:
+        score_color, score_bg, score_label = "#ff4757", "#2e1a1a", "CRITICAL"
 
-    # Download
+    score_col, metrics_col = st.columns([1, 2])
+
+    with score_col:
+        st.markdown(
+            f"<div class='posture-score' style='background:{score_bg};border:2px solid {score_color};'>"
+            f"<div class='score' style='color:{score_color};'>{posture_score}/100</div>"
+            f"<div class='label' style='color:{score_color};'>Security Posture: {score_label}</div>"
+            f"</div>", unsafe_allow_html=True)
+
+    with metrics_col:
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            st.metric("⏱️ Total Scan Time", f"{results['total_time']:.0f}s")
+        with m2:
+            st.metric("🤖 Agents Executed", "5")
+        with m3:
+            slowest = max(results["timings"], key=results["timings"].get)
+            st.metric("🐌 Bottleneck", f"{slowest}", f"{results['timings'][slowest]}s")
+
+    # === RESOURCE INVENTORY ===
+    if "ResourceDiscovery" in results["outputs"]:
+        resources = parse_resources_from_output(results["outputs"]["ResourceDiscovery"])
+        if resources:
+            st.markdown("---")
+            st.markdown("### 📦 Resources discovered")
+            pills_html = " ".join(
+                f"<span class='resource-pill'>{name}: <b>{count}</b></span>"
+                for name, count in resources.items() if count > 0
+            )
+            total = sum(resources.values())
+            pills_html += f" <span class='resource-pill'>Total: <b>{total}</b></span>"
+            st.markdown(pills_html, unsafe_allow_html=True)
+
+    # === FINDINGS BY SEVERITY ===
     st.markdown("---")
-    dl1, dl2 = st.columns(2)
+    st.markdown("### 🚨 Security findings")
+
+    all_scanner_text = results["outputs"].get("SecurityScanner", "")
+    counts = parse_findings_from_output(all_scanner_text)
+    total_findings = sum(counts.values())
+
+    f1, f2, f3, f4, f5 = st.columns(5)
+    with f1:
+        st.markdown(
+            f"<div class='severity-card' style='background:#2d1f1f;border:2px solid #ff4757;'>"
+            f"<div class='count' style='color:#ff4757;'>{counts['CRITICAL']}</div>"
+            f"<div class='label' style='color:#ff4757;'>Critical</div></div>",
+            unsafe_allow_html=True)
+    with f2:
+        st.markdown(
+            f"<div class='severity-card' style='background:#2d2117;border:2px solid #ff6b35;'>"
+            f"<div class='count' style='color:#ff6b35;'>{counts['HIGH']}</div>"
+            f"<div class='label' style='color:#ff6b35;'>High</div></div>",
+            unsafe_allow_html=True)
+    with f3:
+        st.markdown(
+            f"<div class='severity-card' style='background:#2d2a17;border:2px solid #ffa502;'>"
+            f"<div class='count' style='color:#ffa502;'>{counts['MEDIUM']}</div>"
+            f"<div class='label' style='color:#ffa502;'>Medium</div></div>",
+            unsafe_allow_html=True)
+    with f4:
+        st.markdown(
+            f"<div class='severity-card' style='background:#1a2233;border:2px solid #70a1ff;'>"
+            f"<div class='count' style='color:#70a1ff;'>{counts['LOW']}</div>"
+            f"<div class='label' style='color:#70a1ff;'>Low</div></div>",
+            unsafe_allow_html=True)
+    with f5:
+        st.markdown(
+            f"<div class='severity-card' style='background:#1a1a2e;border:2px solid #a8b2d1;'>"
+            f"<div class='count' style='color:#a8b2d1;'>{total_findings}</div>"
+            f"<div class='label' style='color:#a8b2d1;'>Total</div></div>",
+            unsafe_allow_html=True)
+
+    # === AGENT PERFORMANCE ===
+    st.markdown("---")
+    st.markdown("### ⏱️ Agent execution times")
+    st.bar_chart(results["timings"], color="#e94560", height=250)
+
+    # === DETAILED OUTPUTS ===
+    st.markdown("---")
+    st.markdown("### 📋 Detailed outputs")
+
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "🔍 Security Findings",
+        "📜 Compliance",
+        "⚡ Risk Scores",
+        "🔧 Remediation",
+        "🗺️ Inventory",
+    ])
+
+    with tab1:
+        if "SecurityScanner" in results["outputs"]:
+            st.markdown(results["outputs"]["SecurityScanner"][:8000])
+
+    with tab2:
+        if "ComplianceChecker" in results["outputs"]:
+            st.markdown(results["outputs"]["ComplianceChecker"][:8000])
+
+    with tab3:
+        if "RiskScorer" in results["outputs"]:
+            st.markdown(results["outputs"]["RiskScorer"][:8000])
+
+    with tab4:
+        if "RemediationPlanner" in results["outputs"]:
+            st.markdown(results["outputs"]["RemediationPlanner"][:8000])
+
+    with tab5:
+        if "ResourceDiscovery" in results["outputs"]:
+            st.markdown(results["outputs"]["ResourceDiscovery"][:8000])
+
+    # === DOWNLOAD ===
+    st.markdown("---")
+    dl1, dl2, dl3 = st.columns(3)
     with dl1:
         if os.path.exists("security_report.md"):
             with open("security_report.md", "r") as f:
                 report_content = f.read()
             st.download_button(
-                label="📥 Download Full Report (Markdown)",
+                label="📥 Download Report",
                 data=report_content,
                 file_name="security_posture_report.md",
                 mime="text/markdown",
                 use_container_width=True,
             )
     with dl2:
+        all_data = json.dumps(results, indent=2, default=str)
+        st.download_button(
+            label="📊 Export JSON",
+            data=all_data,
+            file_name="security_scan_data.json",
+            mime="application/json",
+            use_container_width=True,
+        )
+    with dl3:
         st.link_button(
-            "📊 View Sentry Traces",
+            "📡 Sentry Traces",
             "https://sentry.io",
             use_container_width=True,
         )
@@ -305,138 +435,127 @@ def display_results(results: dict):
 st.markdown("""
 <div class="main-header">
     <h1>🛡️ AWS Security Posture Agent</h1>
-    <p>Multi-Agent Security Scanner powered by CrewAI + Amazon Bedrock Nova Pro + Sentry AI Monitoring</p>
+    <p>5 AI agents scan your AWS account for misconfigurations, map to CIS benchmarks, score risk, and generate fix commands.</p>
 </div>
 """, unsafe_allow_html=True)
 
 # Sidebar
 with st.sidebar:
-    st.image("https://img.shields.io/badge/Status-Active-brightgreen?style=for-the-badge", width=150)
-    st.markdown("---")
-
     st.markdown("### ⚙️ Configuration")
-    st.markdown(f"""
-    | Setting | Value |
-    |---------|-------|
-    | Region | `us-east-1` |
-    | Model | `Nova Pro v1` |
-    | Agents | `5 (Sequential)` |
-    | Tools | `4 Custom` |
+    st.markdown("""
+    | | |
+    |--|--|
+    | **Region** | us-east-1 |
+    | **LLM** | Bedrock Nova Pro |
+    | **Agents** | 5 (Sequential) |
+    | **Tools** | 5 Custom (boto3) |
+    | **Monitor** | Sentry AI |
     """)
 
     st.markdown("---")
-    st.markdown("### 🏗️ Pipeline Architecture")
+    st.markdown("### 🏗️ Agent pipeline")
     st.code("""
-┌──────────────────────┐
-│ 1. ResourceDiscovery  │
-│    └─ aws_scanner     │
-├──────────────────────┤
-│ 2. SecurityScanner    │
-│    ├─ sg_analyzer     │
-│    ├─ s3_checker      │
-│    ├─ iam_analyzer    │
-│    ├─ ec2_checker     │
-│    └─ lambda_checker  │
-├──────────────────────┤
-│ 3. ComplianceChecker  │
-│    └─ CIS Benchmarks  │
-├──────────────────────┤
-│ 4. RiskScorer         │
-│    └─ CVSS-style      │
-├──────────────────────┤
-│ 5. RemediationPlanner │
-│    └─ AWS CLI fixes   │
-└──────────────────────┘
+ResourceDiscovery
+  └─ aws_resource_scanner
+SecurityScanner
+  ├─ security_group_analyzer
+  ├─ s3_config_checker
+  ├─ iam_analyzer
+  ├─ ec2_security_checker
+  └─ lambda_security_checker
+ComplianceChecker
+  └─ CIS Benchmark mapping
+RiskScorer
+  └─ Severity x Blast x Exploit
+RemediationPlanner
+  └─ AWS CLI fix commands
     """, language=None)
 
     st.markdown("---")
-    st.markdown("### 📡 Observability")
+
     sentry_dsn = os.getenv("SENTRY_DSN", "")
     if sentry_dsn:
-        st.success("Sentry AI Monitoring ✅")
-        st.caption("Traces: gen_ai.invoke_agent × 5")
-        st.caption("Tools: gen_ai.execute_tool × 4")
+        st.markdown("### 📡 Sentry AI Monitoring")
+        st.success("Connected ✅")
+        st.caption("Every scan sends traces with:")
+        st.caption("• gen_ai.invoke_agent x 5")
+        st.caption("• gen_ai.execute_tool x 5")
+        st.caption("• Token usage per agent")
     else:
-        st.warning("⚠️ SENTRY_DSN not configured")
+        st.warning("⚠️ SENTRY_DSN not set")
 
     st.markdown("---")
-    st.markdown("### 🔗 Links")
-    st.markdown("[GitHub Repo](https://github.com/simplynadaf/aws-security-posture-agent)")
-    st.markdown("[Sentry Dashboard](https://sentry.io)")
+    st.markdown("[GitHub](https://github.com/simplynadaf/aws-security-posture-agent) · "
+               "[DEV.to](https://dev.to/sarvarnadaf) · "
+               "[Sentry](https://sentry.io)")
 
-# Main content area
-st.markdown("")
-
-# What it scans section
+# What it checks
 with st.expander("ℹ️ What does this agent check?", expanded=False):
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         st.markdown("""
         **🖥️ Compute**
         - EC2 instance profiles
-        - Unencrypted EBS
-        - Public IPs exposed
+        - Unencrypted EBS volumes
+        - Public IP exposure
         - Default SG attached
-        - Stopped instances
+        - Stopped/orphaned instances
         """)
     with c2:
         st.markdown("""
         **🌐 Network**
-        - Open ports (SSH, RDP, DB)
-        - Wide port ranges
-        - Default SG rules
+        - Open SSH/RDP/DB ports
+        - Wide port ranges (0-65535)
+        - Default SG with rules
         - Stale launch-wizard SGs
         """)
     with c3:
         st.markdown("""
         **🪣 Storage**
-        - S3 encryption
-        - Bucket versioning
+        - Missing S3 encryption
+        - Versioning disabled
         - Public access blocks
         - Bucket policies
         """)
     with c4:
         st.markdown("""
-        **🔑 Identity + Serverless**
-        - AdminAccess roles
+        **🔑 Identity & Lambda**
+        - AdministratorAccess roles
         - Users without MFA
-        - Key rotation
-        - Lambda runtimes
-        - Lambda role perms
-        - Missing DLQs
+        - Access key rotation (>90d)
+        - Lambda overprivileged roles
+        - Missing Dead Letter Queues
         """)
-        """)
-
-st.markdown("")
 
 # Scan button
-col_btn, col_info = st.columns([1, 2])
+st.markdown("")
+col_btn, col_info = st.columns([1, 3])
 with col_btn:
     scan_button = st.button("🔍 Start Security Scan", type="primary", use_container_width=True)
 with col_info:
-    st.caption("Scans EC2, S3, Lambda, IAM, Security Groups, API Gateway, and DynamoDB. Takes ~60 seconds.")
+    st.caption("Scans 7 AWS services across your account. Takes ~60 seconds. "
+              "Results include findings, CIS mapping, risk scores, and copy-paste CLI fixes.")
 
-# Run scan
+# Run
 if scan_button:
     st.markdown("---")
     results = run_scan()
     if results:
         display_results(results)
 
-# Show previous report
 elif os.path.exists("security_report.md"):
     st.markdown("---")
-    st.info("📄 A previous scan report is available below. Click **Start Security Scan** to run fresh.")
-    with st.expander("📋 Last Scan Report", expanded=False):
+    st.info("📄 Previous scan report available. Click **Start Security Scan** for fresh results.")
+    with st.expander("📋 Last scan report", expanded=False):
         with open("security_report.md", "r") as f:
-            st.markdown(f.read())
+            st.markdown(f.read()[:10000])
 
 # Footer
 st.markdown("---")
 st.markdown(
-    "<div style='text-align:center;color:#666;font-size:0.8rem;'>"
-    "Built for DEV's Summer Bug Smash 2026 | Sarvar Nadaf | "
-    "<a href='https://github.com/simplynadaf/aws-security-posture-agent'>GitHub</a>"
+    "<div style='text-align:center;color:#555;font-size:0.8rem;'>"
+    "AWS Security Posture Agent · Built for DEV Summer Bug Smash 2026 · "
+    "<a href='https://github.com/simplynadaf/aws-security-posture-agent' style='color:#e94560;'>Sarvar Nadaf</a>"
     "</div>",
     unsafe_allow_html=True,
 )
