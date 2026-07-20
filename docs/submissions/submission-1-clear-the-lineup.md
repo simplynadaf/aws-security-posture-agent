@@ -16,15 +16,21 @@ The agents run sequentially on CrewAI with Amazon Bedrock Nova Pro as the LLM:
 
 ```
 1. ResourceDiscovery    → inventories EC2, S3, Lambda, IAM, SGs, API GW, DynamoDB
-2. SecurityScanner      → finds open ports, public buckets, admin roles
+2. SecurityScanner      → finds open ports, public buckets, admin roles, insecure configs
 3. ComplianceChecker    → maps to CIS AWS Foundations Benchmark
 4. RiskScorer           → severity × blast radius × exploitability
 5. RemediationPlanner   → generates AWS CLI fix commands
 ```
 
-Each agent has custom boto3 tools that make real AWS API calls against a live account with 90 IAM roles, 13 S3 buckets, 9 security groups, and 7 Lambda functions. Not test data. Real findings.
+Each agent has custom boto3 tools that make real AWS API calls against a live account with 90 IAM roles, 14 S3 buckets, 9 security groups, and 7 Lambda functions. Not test data. Real findings.
 
 {% github https://github.com/simplynadaf/aws-security-posture-agent %}
+
+### Demo
+
+Here's the full scan running against my AWS account. The scan portion is sped up 4x, results walkthrough is at normal speed:
+
+{% youtube YOUR_YOUTUBE_VIDEO_ID %}
 
 ## Bug Fix or Performance Improvement
 
@@ -36,8 +42,9 @@ One tool. Wrong default. The entire pipeline suffered.
 
 ## Code
 
-**PR with the fix:**
-{% github https://github.com/simplynadaf/aws-security-posture-agent %}
+PR with the fix:
+
+{% github https://github.com/simplynadaf/aws-security-posture-agent/pull/1 %}
 
 The core change lives in `src/security_posture/tools/iam_analyzer.py`. Here's the before and after:
 
@@ -121,7 +128,7 @@ The disproportion was the clue. The fix followed naturally: if the tool output i
 | SecurityScanner time | 22.6s | 17.8s | 21% faster |
 | IAM API calls | 59 | 20 | 66% fewer |
 | Total pipeline | 62.0s | 57.7s | 7% faster |
-| Security findings | 27 | 27 | No coverage loss |
+| Security findings | 97 | 97 | No coverage loss |
 
 The 21% improvement on the SecurityScanner came from the LLM completing analysis in a single pass instead of retrying.
 
@@ -140,7 +147,9 @@ Transaction: "Security Posture Scan" (57s)
 ├── gen_ai.invoke_agent: SecurityScanner
 │   ├── gen_ai.execute_tool: security_group_analyzer
 │   ├── gen_ai.execute_tool: s3_config_checker
-│   └── gen_ai.execute_tool: iam_analyzer
+│   ├── gen_ai.execute_tool: iam_analyzer
+│   ├── gen_ai.execute_tool: ec2_security_checker
+│   └── gen_ai.execute_tool: lambda_security_checker
 ├── gen_ai.invoke_agent: ComplianceChecker
 ├── gen_ai.invoke_agent: RiskScorer
 └── gen_ai.invoke_agent: RemediationPlanner
@@ -184,8 +193,12 @@ def trace_tool(tool_name: str):
                 span.set_data("gen_ai.tool.name", tool_name)
                 result = func(*args, **kwargs)
                 span.set_data("result_length_chars", len(result))
-                if "findings_count" in json.loads(result):
-                    span.set_data("findings_count", data["findings_count"])
+                try:
+                    data = json.loads(result)
+                    if "findings_count" in data:
+                        span.set_data("findings_count", data["findings_count"])
+                except (json.JSONDecodeError, KeyError):
+                    pass
                 return result
         return wrapper
     return decorator
@@ -197,7 +210,7 @@ def trace_tool(tool_name: str):
 |---------|--------------|
 | **Distributed Tracing** | Full pipeline trace from start to final report |
 | **AI Agent Monitoring** | `gen_ai.invoke_agent` spans for all 5 agents |
-| **Tool Execution Tracing** | `gen_ai.execute_tool` spans for all 4 boto3 tools |
+| **Tool Execution Tracing** | `gen_ai.execute_tool` spans for all 5 boto3 tools |
 | **Custom Span Data** | Token counts, output sizes, duration, finding counts |
 | **Error Monitoring** | Exception capture with `sentry_sdk.capture_exception()` |
 | **Breadcrumbs** | Agent completion events via task callbacks |
@@ -223,4 +236,4 @@ That's the difference between "add some logging" and actual AI observability.
 
 ---
 
-*Built during DEV's Summer Bug Smash 2026. The agent found 27 real security findings in my AWS account, including open SSH ports, missing MFA, and roles with full admin access. The fix is in production.*
+*Built during DEV's Summer Bug Smash 2026. The agent found 97 real security findings in my AWS account, including open SSH ports, missing MFA, roles with full admin access, unencrypted EBS volumes, and Lambda functions on deprecated runtimes. The fix is in production.*
