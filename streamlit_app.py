@@ -100,16 +100,42 @@ st.markdown("""
 
 
 def parse_findings_from_output(output_text):
-    """Parse security findings from agent output to get structured counts."""
+    """Parse security findings from agent output to get structured counts.
+    
+    Handles multiple formats the LLM might produce:
+    - JSON: "severity": "CRITICAL"
+    - Markdown: **Severity:** CRITICAL or Severity: CRITICAL
+    - Table: | CRITICAL |
+    - Emoji: red/orange/yellow circle followed by severity word
+    """
     counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
 
     for sev in counts:
-        pattern = r'"severity":\s*"' + sev + r'"'
-        matches = re.findall(pattern, output_text, re.IGNORECASE)
-        if matches:
-            counts[sev] = len(matches)
+        patterns = [
+            r'"severity":\s*"' + sev + r'"',
+            r'[Ss]everity[:\s]*\**\s*' + sev,
+            r'\|\s*' + sev + r'\s*\|',
+            r'[-*]\s*\**' + sev + r'\**',
+            r'\b' + sev + r'\b.*?(?:finding|issue|risk|vulnerability)',
+            r'(?:finding|issue|risk|vulnerability).*?\b' + sev + r'\b',
+        ]
+        for pattern in patterns:
+            matches = re.findall(pattern, output_text, re.IGNORECASE)
+            if matches:
+                counts[sev] = max(counts[sev], len(matches))
+
+    # Also check RiskScorer-style output for counts
+    # Pattern: "CRITICAL: 12" or "Critical findings: 5"
+    for sev in counts:
+        count_pattern = r'(?:' + sev + r')\s*[:\-]?\s*(\d+)'
+        match = re.search(count_pattern, output_text, re.IGNORECASE)
+        if match:
+            parsed_count = int(match.group(1))
+            if parsed_count > counts[sev]:
+                counts[sev] = parsed_count
 
     return counts
+
 
 
 def parse_resources_from_output(output_text):
@@ -323,7 +349,8 @@ def display_results(results):
     st.markdown("---")
     st.markdown("### 🚨 Security findings")
 
-    all_scanner_text = results["outputs"].get("SecurityScanner", "")
+    # Combine SecurityScanner + RiskScorer outputs for severity parsing
+    all_scanner_text = results["outputs"].get("SecurityScanner", "") + "\n" + results["outputs"].get("RiskScorer", "")
     counts = parse_findings_from_output(all_scanner_text)
     total_findings = sum(counts.values())
 
