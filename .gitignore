@@ -7,3 +7,10 @@ security_report.md
 dist/
 build/
 .cache/
+docs/PROGRESS-LOG.md
+docs/IMPROVEMENTS-TODO.md
+docs/screenshots/
+docs/videos/
+record*.mjs
+record*.py
+take-screenshots.js
