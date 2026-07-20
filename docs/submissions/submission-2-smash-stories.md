@@ -1,5 +1,5 @@
 ---
-title: "4 Silent Failures, 2 Undocumented APIs, and a Container That Crashed Because of a Missing User Directive"
+title: "My AI Agent Worked Perfectly. Then I Deployed It. 4 Silent Failures Nobody Documented."
 published: true
 description: "What happened when I tried to deploy a CrewAI agent to AWS Bedrock AgentCore. Every error was a 200 OK. Every fix took hours to find. Here's the full debugging trail."
 tags: devchallenge, bugsmash, ai, aws
