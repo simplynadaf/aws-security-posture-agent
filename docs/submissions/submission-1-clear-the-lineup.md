@@ -1,7 +1,7 @@
 ---
 title: "Sentry's AI Agent Monitoring Caught a Token Explosion in My 5-Agent AWS Security Scanner"
 published: true
-description: "How gen_ai.invoke_agent spans revealed that one tool was burning 3x the tokens it should. The fix: pagination + a token budget guard. 42% output reduction, 21% faster agent."
+description: "One tool burned 3x the tokens it should. Sentry agent tracing found it. Fix: pagination + token budget guard. 42% smaller output, 21% faster."
 tags: devchallenge, bugsmash, ai, aws
 cover_image: [COVER_IMAGE_URL]
 ---
